@@ -6,19 +6,19 @@
 [![Ollama](https://img.shields.io/badge/LLM-llama3.2%3A3b-orange.svg)](https://ollama.ai/)
 [![Streamlit](https://img.shields.io/badge/UI-Streamlit-red.svg)](https://streamlit.io/)
 
-A fully local, modular Retrieval-Augmented Generation (RAG) system engineered from the ground up with local embeddings, persistent vector storage, grounded prompt templates with explicit abstention rules, citation attribution, and automated retrieval benchmarking.
+A fast, fully local Retrieval-Augmented Generation (RAG) assistant built from scratch with local embeddings, ChromaDB vector storage, grounded prompts that strictly refuse to guess, source citations, and automated evaluation scripts.
 
 ---
 
 ## 📌 Problem Statement
 
-Foundation LLMs frequently hallucinate or confidently fabricate answers when queried on internal documentation, private codebases, or specialized knowledge beyond their training cutoff. 
+Standard LLMs often make things up or guess when asked about private documents or information they were not trained on.
 
-This project constructs a complete, reproducible, and verifiable local RAG pipeline that:
-1. **Grounds LLM responses** exclusively in retrieved knowledge chunks.
-2. **Eliminates hallucinations** via strict system-prompt boundary constraints and mandatory abstention triggers ("I don't have enough information in the knowledge base to answer that").
-3. **Provides verifiable attribution** by citing source documents and chunk numbers on every response.
-4. **Protects privacy and costs** by executing 100% locally with zero external API calls.
+This project builds a simple, reliable, and completely local RAG pipeline that:
+1. **Answers only from retrieved documents** rather than general training data.
+2. **Prevents hallucinations** with clear system prompt boundaries and a mandatory refusal rule ("I don't have enough information in the knowledge base to answer that").
+3. **Cites exact sources** by listing the source file and chunk number for every answer.
+4. **Keeps data private and free** by running 100% locally with zero external API calls.
 
 ---
 
@@ -28,8 +28,8 @@ This project constructs a complete, reproducible, and verifiable local RAG pipel
 flowchart TD
     subgraph Offline Ingestion & Indexing
         D[Raw Documents: .md, .txt, .ipynb] -->|chunk.py| C[1,250 Chunks<br/>800 chars, 150 overlap]
-        C -->|3_embed.py| E[Dense Embeddings<br/>all-MiniLM-L6-v2, 384-dim]
-        E -->|4_vecstore.py| V[(ChromaDB Persistent Store<br/>knowledge_base collection)]
+        C -->|embed.py| E[Dense Embeddings<br/>all-MiniLM-L6-v2, 384-dim]
+        E -->|build_vectorstore.py| V[(ChromaDB Persistent Store<br/>knowledge_base collection)]
     end
 
     subgraph Online Query & Retrieval
@@ -52,42 +52,42 @@ flowchart TD
 
 | Stage | Script | Technology | Description |
 |---|---|---|---|
-| **1. Chunking** | [chunk.py](chunk.py) | Python, JSON | Parses Markdown, plain text, and Jupyter Notebook cells (`markdown` and `code`), slicing documents into overlapping 800-character windows with 150-character overlap to preserve semantic continuity across boundaries. Produces 1,250 indexed chunks. |
-| **2. Embeddings** | [3_embed.py](3_embed.py) | `sentence-transformers` | Generates normalized 384-dimensional dense vectors using `all-MiniLM-L6-v2` and persists them as a NumPy array (`embeddings.npy`). |
-| **3. Vector Store** | [4_vecstore.py](4_vecstore.py) | `chromadb` | Populates a persistent ChromaDB database (`vector_store/`) indexing chunk text, IDs, and rich metadata (file path, chunk index). |
-| **4. Retrieval Engine** | [retrieve.py](retrieve.py) | `chromadb`, PyTorch | Encodes incoming queries, executes nearest-neighbor cosine queries against ChromaDB, and returns ranked chunks with similarity distance scores. |
-| **5. Grounded RAG** | [rag_pipeline.py](rag_pipeline.py) | `ollama` (`llama3.2:3b`) | Constructs an isolated context block, injects anti-hallucination prompt boundaries, prompts the local LLM at `temperature=0`, and returns attributed answers. |
+| **1. Chunking** | [chunk.py](chunk.py) | Python, JSON | Parses Markdown, text, and Jupyter Notebook cells, splitting them into 800-character chunks with a 150-character overlap to keep context intact across boundaries. Produces 1,250 indexed chunks. |
+| **2. Embeddings** | [embed.py](embed.py) | `sentence-transformers` | Generates 384-dimensional dense vectors using `all-MiniLM-L6-v2` and saves them to disk (`embeddings.npy`). |
+| **3. Vector Store** | [build_vectorstore.py](build_vectorstore.py) | `chromadb` | Creates and populates a local ChromaDB database (`vector_store/`) indexing chunk text, IDs, and metadata (file path and chunk number). |
+| **4. Retrieval Engine** | [retrieve.py](retrieve.py) | `chromadb`, PyTorch | Encodes the user's query, runs a nearest-neighbor cosine search against ChromaDB, and returns the top matching chunks with distance scores. |
+| **5. Grounded RAG** | [rag_pipeline.py](rag_pipeline.py) | `ollama` (`llama3.2:3b`) | Builds the context block, injects anti-hallucination rules, runs the local LLM at `temperature=0`, and returns the attributed answer. |
 | **6. Web Interface** | [app.py](app.py) | `streamlit` | Clean, interactive web UI with real-time Top-K tuning (1–5), response latency tracking, and collapsible source evidence inspectors. |
 
 ---
 
-## 🛡️ Anti-Hallucination & Grounding Strategy
+## 🛡️ Anti-Hallucination & Grounding Rules
 
-The system prompt enforces five non-negotiable operational invariants:
-1. **Closed-Domain Constraint:** The model is forbidden from using pre-training knowledge to answer domain questions.
-2. **Explicit Abstention Protocol:** If the retrieved chunks lack sufficient evidence, the model must return verbatim:
+The system prompt follows five practical rules to prevent false answers:
+1. **Use Only Provided Context:** The model must not use outside assumptions to answer questions about the knowledge base.
+2. **Say "I Don't Know":** If the retrieved chunks do not contain the answer, the model must return verbatim:
    > *"I don't have enough information in the knowledge base to answer that."*
-3. **Zero Fabrication:** Speculation or extrapolating missing steps is prohibited.
-4. **Attribution Requirement:** Every answered query must terminate with an explicit list of source numbers used (e.g. `Sources used: [1, 2]`).
-5. **Deterministic Inference:** Configured with `temperature: 0` to prevent stochastic hallucinations across runs.
+3. **No Guessing or Extrapolation:** If a detail is missing, state that it is missing rather than filling in blanks.
+4. **Source Citations:** Every valid answer must list the source numbers used (e.g. `Sources used: [1, 2]`).
+5. **Deterministic Settings (`temperature=0`):** Runs the model with zero temperature so answers remain consistent and factual.
 
 ---
 
 ## 🔬 Evaluation & Benchmarks
 
-The repository includes dual evaluation suites assessing answer accuracy, abstention reliability, and Top-K retrieval dynamics:
+The project includes two evaluation scripts to test answer accuracy, abstention behavior, and Top-K tradeoffs:
 
-### 1. Behavioral & Abstention Benchmark (`7_rag_eval.py`)
-Tests 10 curated questions across varying Top-K configurations:
-- **6 Answerable In-Scope Queries** (e.g., tokenization mechanisms, vector database roles, chunking strategies).
-- **4 Out-of-Scope / Adversarial Queries** (questions intentionally absent from the corpus to verify abstention compliance).
+### 1. Behavior & Abstention Test (`eval_rag.py`)
+Tests 10 curated questions across different Top-K values (1, 3, and 5):
+- **6 In-Scope Questions** (e.g. tokenization, vector databases, chunking strategies) to confirm the model answers accurately when context is present.
+- **4 Out-of-Scope Questions** (e.g. sports, cooking, general trivia) to verify the model correctly says it does not have enough information.
 
 ### 2. Retrieval Attribution & Top-K Parameter Study (`rag_test_cases.py`)
-Evaluates retrieval sensitivity across $K \in \{1, 3, 5\}$:
-- **Abstention Accuracy:** Percentage of out-of-scope prompts that triggered strict refusal.
-- **Source Match Rate:** Precision of retrieving chunks originating from the ground-truth topic document.
-- **Irrelevant Chunk Ratio:** Measures context contamination as $K$ increases.
-- **Latency Profiling:** End-to-end response time tracking across vector search and model inference.
+Measures how retrieval performance shifts across Top-K (1, 3, 5):
+- **Abstention Accuracy:** How reliably out-of-scope questions trigger a refusal.
+- **Source Match Rate:** How often the top-retrieved chunks match the intended document.
+- **Noise vs. Context:** How extra chunks impact prompt size and answer focus as $K$ increases.
+- **Latency:** End-to-end response time for embedding, retrieval, and generation.
 
 ---
 
@@ -96,29 +96,29 @@ Evaluates retrieval sensitivity across $K \in \{1, 3, 5\}$:
 ### 1. Prerequisites
 - Python 3.10+
 - [Ollama](https://ollama.ai/) installed and running locally
-- Pull the 3B inference model:
+- Pull the 3B model:
   ```bash
   ollama pull llama3.2:3b
   ```
 
 ### 2. Installation
 ```bash
-git clone https://github.com/your-username/rag-knowledge-assistant.git
+git clone https://github.com/prdve/rag-knowledge-assistant.git
 cd rag-knowledge-assistant
 pip install -r requirements.txt
 ```
 
 ### 3. Pipeline Indexing (Pre-built artifacts included)
-*Note: The repository already includes indexed `chunks.json`, `embeddings.npy`, and `vector_store/`. To re-index from scratch:*
+*Note: The repository already includes indexed `chunks.json`, `embeddings.npy`, and `vector_store/`. To rebuild everything from scratch:*
 ```bash
-# Extract and chunk documents
+# 1. Extract and chunk documents
 python chunk.py
 
-# Compute vector embeddings
-python 3_embed.py
+# 2. Compute vector embeddings
+python embed.py
 
-# Build ChromaDB collection
-python 4_vecstore.py
+# 3. Build ChromaDB collection
+python build_vectorstore.py
 ```
 
 ### 4. Running the Assistant
@@ -134,7 +134,7 @@ python rag_pipeline.py
 
 #### Run Automated Evaluation
 ```bash
-python 7_rag_eval.py
+python eval_rag.py
 python rag_test_cases.py
 ```
 
@@ -145,12 +145,12 @@ python rag_test_cases.py
 ```
 rag-knowledge-assistant/
 ├── chunk.py                  # Document ingestion and character-overlap chunker
-├── 3_embed.py                # Batch vector embedding with all-MiniLM-L6-v2
-├── 4_vecstore.py             # ChromaDB persistent collection loader
+├── embed.py                  # Batch vector embedding with all-MiniLM-L6-v2
+├── build_vectorstore.py      # ChromaDB persistent collection loader
 ├── retrieve.py               # Semantic query encoder and cosine search engine
 ├── rag_pipeline.py           # Grounded prompt assembly and Ollama inference
 ├── app.py                    # Streamlit web application with source inspectors
-├── 7_rag_eval.py             # Behavioral evaluation suite (answer vs. abstain)
+├── eval_rag.py               # Behavioral evaluation suite (answer vs. abstain)
 ├── rag_test_cases.py         # Advanced evaluation (source match & Top-K tuning)
 ├── requirements.txt          # Python dependencies
 ├── chunks.json               # Serialized chunk corpus (1,250 chunks)
